@@ -17,6 +17,10 @@
                         <div class="task-info"><strong>{{ $task->name }}</strong><small>Created {{ $task->created_at->format('M j, Y') }}</small></div>
                         <div class="actions">
                             <a href="{{ route('tasks.edit', [$project, $task]) }}">Edit</a>
+                            <form method="post" action="{{ route('tasks.destroy', [$project, $task]) }}" data-confirm="Delete this task?">
+                                @csrf @method('delete')
+                                <button class="delete" type="submit" aria-label="Delete {{ $task->name }}">Delete</button>
+                            </form>
                         </div>
                     </li>
                 @endforeach

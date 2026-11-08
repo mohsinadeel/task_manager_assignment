@@ -41,4 +41,18 @@ class TaskController extends Controller
 
         return to_route('tasks.index', ['project' => $project->id])->with('status', 'Task updated.');
     }
+
+    public function destroy(Project $project, Task $task): RedirectResponse
+    {
+        DB::transaction(function () use ($project, $task) {
+            $locked = Project::whereKey($project->id)->lockForUpdate()->firstOrFail();
+            $current = $locked->tasks()->findOrFail($task->id);
+            $priority = $current->priority;
+            $current->delete();
+            $locked->tasks()->where('priority', '>', $priority)->decrement('priority');
+            $locked->increment('order_version');
+        }, 3);
+
+        return to_route('tasks.index', ['project' => $project->id])->with('status', 'Task deleted.');
+    }
 }
