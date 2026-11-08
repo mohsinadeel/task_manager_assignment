@@ -10,12 +10,16 @@
                 <input id="task-name" name="name" value="{{ old('name') }}" maxlength="255" required placeholder="What needs to be done?">
                 <button type="submit">Add task</button>
             </form>
-            <ol>
+            <p id="order-status" class="hint" role="status" aria-live="polite">Highest priority at the top. Use the handle or arrow buttons to reorder.</p>
+            <ol id="task-list" data-url="{{ route('tasks.reorder', $project) }}" data-version="{{ $project->order_version }}">
                 @foreach($tasks as $task)
                     <li data-id="{{ $task->id }}">
+                        <button class="handle icon" type="button" aria-label="Drag {{ $task->name }}" title="Drag to reorder">⠿</button>
                         <span class="priority">{{ $task->priority }}</span>
                         <div class="task-info"><strong>{{ $task->name }}</strong><small>Created {{ $task->created_at->format('M j, Y') }}</small></div>
                         <div class="actions">
+                            <button class="icon move" type="button" data-direction="-1" aria-label="Move {{ $task->name }} up">↑</button>
+                            <button class="icon move" type="button" data-direction="1" aria-label="Move {{ $task->name }} down">↓</button>
                             <a href="{{ route('tasks.edit', [$project, $task]) }}">Edit</a>
                             <form method="post" action="{{ route('tasks.destroy', [$project, $task]) }}" data-confirm="Delete this task?">
                                 @csrf @method('delete')
