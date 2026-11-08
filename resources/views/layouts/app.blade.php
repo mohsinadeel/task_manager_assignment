@@ -11,7 +11,7 @@
 <main>
     <header>
         <a class="brand" href="{{ route('tasks.index') }}">Task manager</a>
-        <a class="repo-link" href="{{ rtrim(config('services.portal_url'), '/').'/feedback?demo=tasks' }}">Suggest a feature</a>
+        <a class="repo-link" href="{{ rtrim(config('services.portal_url'), '/').'/feedback?demo=tasks' }}">Send feedback</a>
         <a class="repo-link" href="https://github.com/mohsinadeel/task_manager_assignment" target="_blank" rel="noopener noreferrer">View on GitHub</a>
     </header>
     @if(session('status')) <p class="notice" role="status">{{ session('status') }}</p> @endif
