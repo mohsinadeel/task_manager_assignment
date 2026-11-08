@@ -1,5 +1,9 @@
 <?php
 
+use App\Http\Controllers\TaskController;
 use Illuminate\Support\Facades\Route;
 
-Route::view('/', 'tasks.index')->name('tasks.index');
+Route::get('/', [TaskController::class, 'index'])->name('tasks.index');
+Route::scopeBindings()->prefix('projects/{project}')->group(function () {
+    Route::post('/tasks', [TaskController::class, 'store'])->name('tasks.store');
+});
