@@ -39,9 +39,9 @@ docker run --rm -u "$(id -u):$(id -g)" \
 ./vendor/bin/sail artisan db:seed
 ```
 
-Open **http://localhost:8088**. Without seeding, create a project first. The project selector uses a normal GET form: choose a project, then click **View tasks**.
+Open **http://localhost:8082**. Without seeding, create a project first. The project selector uses a normal GET form: choose a project, then click **View tasks**.
 
-MySQL runs on the private Compose network at `mysql:3306` and persists in a named Docker volume. The default password is for local development. Change `APP_PORT` and `APP_URL` in `.env` if port 8088 is busy. The first Sail build downloads PHP packages and can take several minutes.
+MySQL runs on the private Compose network at `mysql:3306` and persists in a named Docker volume. The default password is for local development. Change `APP_PORT` and `APP_URL` in `.env` if port 8082 is busy. The first Sail build downloads PHP packages and can take several minutes.
 
 Useful commands:
 
@@ -78,13 +78,57 @@ Controllers, Form Requests, Eloquent relationships, migrations, and Blade are su
 
 ## Verification
 
-Feature tests cover task CRUD, deletion compaction, project filtering and scoped routes, input validation, escaped task names, persisted reordering, stale versions, and invalid reorder payloads. Tests run against MySQL rather than substituting SQLite. GitHub Actions runs the PHP 8.3 / MySQL tests, asset build, and Pint formatting check on pushes and pull requests.
+Feature tests cover task CRUD, deletion compaction, project filtering and scoped routes, input validation, escaped task names, persisted reordering, stale versions, and invalid reorder payloads. Tests run against MySQL rather than substituting SQLite. GitHub Actions provides a manual-only (`workflow_dispatch`) PHP 8.3 / MySQL verification workflow for the tests, asset build and Pint formatting check. Local Sail/MySQL checks are required before pushing; pushes and pull requests do not automatically start CI.
+
+## Integration with the Engineering Demos portal
+
+The portal and each demo keep separate repositories and application directories. This checkout belongs at `C:\repos\demos\laravel-task-management-demo`; the parent portal excludes it from Git, Tailwind/Vite scanning and deployment archives.
+
+Local development uses an independent Compose project and persistent MySQL volume. The portal is on port 8080, Stripe on 8081 and this app on **8082**. MySQL is not published on a host port, and this app uses built assets without a published Vite port.
+
+Production shares one MySQL database with the portal and Stripe demo. These settings give this application its own namespace:
+
+```dotenv
+DB_CONNECTION=mysql
+DB_TABLE_PREFIX=tasks_
+DB_MIGRATIONS_TABLE=migrations
+SESSION_DRIVER=file
+SESSION_COOKIE=task_management_session
+```
+
+The physical tables are `tasks_projects`, `tasks_tasks` and `tasks_migrations`. `DB_MIGRATIONS_TABLE` is the logical name; do not set it to `tasks_migrations` or the prefix will be applied twice. Main tables remain unprefixed; Stripe tables retain their `stripe_` prefix. This demo has no authentication and does not create or modify shared users. It has its own application key and file-session directory.
+
+Changing the prefix does not rename or import an existing standalone schema. Earlier local unprefixed records remain intact, while the prefixed schema starts empty or with optional synthetic seed data. Back up and plan an explicit data migration if those older records need importing.
+
+For the hosted subdirectory, the intended layout is:
+
+```text
+/home6/inceptio/demo.mohsinadeel.dev/main/public/laravel-task-management-demo
+    -> ../../laravel-task-management-demo/public
+```
+
+Set production `APP_URL` and `ASSET_URL` to `https://demo.mohsinadeel.dev/laravel-task-management-demo`, `SESSION_PATH=/laravel-task-management-demo`, `SESSION_SECURE_COOKIE=true`, and point `DB_HOST` / `DB_DATABASE` at the existing shared database. Keep the app's own `APP_KEY` and cookie name; do not copy the portal's key. Deploy the main app before this demo. Serve only `public/`.
+
+Use normal `php artisan migrate --force` on the shared server. **Never run `migrate:fresh`, `db:wipe` or an automated test suite against the shared production database.** The test harness refuses to initialise unless it is running in testing mode with MySQL database `testing` and prefix `tasks_test_`, before database-refresh traits can run.
+
+Local migration-isolation and simulated subdirectory-request tests do not prove Apache symlink behaviour on the hosted server. Hosted deployment and browser verification remain separate steps. See `evidence/LOCAL-INTEGRATION.md` for recorded evidence and limits.
+
+## GitHub Actions
+
+Both workflows are **manual-only** in the Actions tab:
+
+- **Task Management checks** installs locked dependencies, builds Sail PHP 8.3 / MySQL, builds assets, checks Pint and runs PHPUnit against the disposable `testing` database.
+- **Deploy Task Management demo** builds production dependencies and assets, connects through OpenVPN and SSH, uploads the application, checks the production table prefix and session configuration, runs normal migrations and creates the public-directory symlink. It does not seed automatically and keeps route caching disabled for the hosted subdirectory.
+
+The deployment uses the repository's `production` environment. Set variables `SSH_HOST` and `DEPLOY_PATH` (exactly `/home6/inceptio/demo.mohsinadeel.dev/laravel-task-management-demo`). Configure secrets `OPENVPN_CONFIG`, `VPN_USERNAME`, `VPN_PASSWORD`, `SSH_PRIVATE_KEY`, `SSH_USERNAME`, `SSH_PORT` and `SSH_KNOWN_HOSTS`. The known-hosts value must come from an independently verified server fingerprint; the workflow enforces host-key verification. Keep the server `.env` private and provision it before the first deployment. PHP 8.4 is selected on the server to match the portal; the app's minimum remains PHP 8.3.
+
+Workflow syntax checks do not prove VPN, SSH credentials or server routing. No deployment has been run for this integration.
 
 ## Deployment
 
 Sail is the development environment. For a server, deploy this as a standard Laravel application using PHP **8.3+** with Composer, MySQL **8.4**, and Nginx / Apache with PHP-FPM. Install the [Laravel-required PHP extensions](https://laravel.com/docs/12.x/deployment#server-requirements), including `pdo_mysql`. Build assets in CI or on a build machine with Node 22+.
 
-1. Provision an empty MySQL database and a dedicated database user. Configure the web server's document root to the application's **public/** directory, with requests forwarded to `public/index.php`.
+1. For the Engineering Demos host, use the existing shared MySQL database. Configure this app with its own table prefix; do not create, drop or alter portal users or Stripe tables. For a standalone installation, provision a separate MySQL database and database user. Configure the web server's document root to the application's **public/** directory, with requests forwarded to `public/index.php`.
 2. Create a server-only `.env` with `APP_ENV=production`, `APP_DEBUG=false`, the real HTTPS `APP_URL`, a strong database password, and `DB_HOST` set to the actual database host. Keep `.env` outside version control. Use `SESSION_SECURE_COOKIE=true` with HTTPS.
 3. Install and build:
 

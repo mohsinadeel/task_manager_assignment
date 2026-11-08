@@ -1,37 +1,42 @@
-name: Tests
-on: [push, pull_request]
+name: Task Management checks
+
+on:
+  workflow_dispatch:
+
 permissions:
   contents: read
+
 jobs:
-  tests:
+  ci:
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.4
-        env:
-          MYSQL_ROOT_PASSWORD: password
-          MYSQL_DATABASE: testing
-        ports: ["3306:3306"]
-        options: --health-cmd="mysqladmin ping -ppassword" --health-interval=10s --health-timeout=5s --health-retries=10
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: shivammathur/setup-php@v2
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          php-version: "8.3"
-          extensions: pdo_mysql
+          persist-credentials: false
+      - name: Set up PHP for dependency bootstrap
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: '8.3'
+          tools: composer:v2
           coverage: none
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-      - run: composer install --no-interaction --prefer-dist
-      - run: cp .env.example .env && php artisan key:generate
-      - run: npm ci && npm run build
-      - run: vendor/bin/pint --test
-      - run: php artisan test
-        env:
-          DB_CONNECTION: mysql
-          DB_HOST: 127.0.0.1
-          DB_DATABASE: testing
-          DB_USERNAME: root
-          DB_PASSWORD: password
+      - name: Prepare locked dependencies and test environment
+        run: |
+          composer install --no-interaction --no-progress --prefer-dist
+          cp .env.example .env
+          php artisan key:generate --no-interaction
+      - name: Start Sail and MySQL
+        run: docker compose -p task-management-demo-ci up -d --build --wait --wait-timeout 180
+      - name: Build assets and run application checks in Sail
+        run: |
+          docker compose -p task-management-demo-ci exec -T laravel.test npm ci
+          docker compose -p task-management-demo-ci exec -T laravel.test npm run build
+          docker compose -p task-management-demo-ci exec -T laravel.test vendor/bin/pint --test
+          docker compose -p task-management-demo-ci exec -T laravel.test php artisan test --no-ansi --do-not-cache-result
+      - name: Show failure logs
+        if: failure()
+        run: docker compose -p task-management-demo-ci logs --no-color --tail=100
+      - name: Clean up the CI stack
+        if: always()
+        run: docker compose -p task-management-demo-ci down --volumes --remove-orphans

@@ -1,0 +1,198 @@
+name: Deploy Task Management demo
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: task-management-demo-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          coverage: none
+
+      - name: Install production PHP dependencies
+        run: composer install --no-dev --optimize-autoloader --no-interaction --no-progress
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build frontend assets
+        run: npm ci && npm run build
+
+      - name: Connect to OpenVPN
+        env:
+          OPENVPN_CONFIG: ${{ secrets.OPENVPN_CONFIG }}
+          VPN_USERNAME: ${{ secrets.VPN_USERNAME }}
+          VPN_PASSWORD: ${{ secrets.VPN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y openvpn
+          umask 077
+          printf '%s\n' "$OPENVPN_CONFIG" > "$RUNNER_TEMP/demos.ovpn"
+          printf '%s\n%s\n' "$VPN_USERNAME" "$VPN_PASSWORD" > "$RUNNER_TEMP/demos-vpn.auth"
+          sudo openvpn --config "$RUNNER_TEMP/demos.ovpn" \
+            --auth-user-pass "$RUNNER_TEMP/demos-vpn.auth" \
+            --auth-nocache --daemon \
+            --log "$RUNNER_TEMP/demos-openvpn.log" \
+            --writepid "$RUNNER_TEMP/demos-openvpn.pid"
+          for i in $(seq 1 30); do
+            if ip -brief addr show tun0 up 2>/dev/null | grep -q tun0; then
+              echo "OpenVPN connection is up."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "OpenVPN did not connect."
+          sudo cat "$RUNNER_TEMP/demos-openvpn.log"
+          exit 1
+
+      - name: Prepare SSH credentials
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$RUNNER_TEMP/demos-deploy-key"
+          chmod 600 "$RUNNER_TEMP/demos-deploy-key"
+          ssh-keygen -y -f "$RUNNER_TEMP/demos-deploy-key" > /dev/null
+          test -n "$SSH_KNOWN_HOSTS" || { echo "SSH_KNOWN_HOSTS is required."; exit 1; }
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/demos-known-hosts"
+
+      - name: Upload built application
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          if [[ "$DEPLOY_PATH" != "/home6/inceptio/demo.mohsinadeel.dev/laravel-task-management-demo" ]]; then
+            echo "DEPLOY_PATH must match the confirmed demo-app directory."
+            exit 1
+          fi
+          PORT="$SSH_PORT"
+          PORT="${PORT:-22}"
+          SSH_OPTS=(-p "$PORT" -i "$RUNNER_TEMP/demos-deploy-key"
+            -o IdentitiesOnly=yes -o BatchMode=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/demos-known-hosts")
+          ssh "${SSH_OPTS[@]}" "$SSH_USERNAME@$SSH_HOST" 'command -v tar >/dev/null && echo SSH-OK'
+          tar --exclude-from=.github/deploy-exclude.txt -czf - . \
+            | ssh "${SSH_OPTS[@]}" "$SSH_USERNAME@$SSH_HOST" \
+                "mkdir -p '$DEPLOY_PATH' && tar -xzf - -C '$DEPLOY_PATH'"
+
+      - name: Run Laravel release steps
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USERNAME: ${{ secrets.SSH_USERNAME }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+        run: |
+          set -euo pipefail
+          PORT="$SSH_PORT"
+          PORT="${PORT:-22}"
+          SSH_OPTS=(-p "$PORT" -i "$RUNNER_TEMP/demos-deploy-key"
+            -o IdentitiesOnly=yes -o BatchMode=yes
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/demos-known-hosts")
+
+          ssh "${SSH_OPTS[@]}" "$SSH_USERNAME@$SSH_HOST" bash -s <<'REMOTE'
+          set -euo pipefail
+          DEPLOY_PATH="/home6/inceptio/demo.mohsinadeel.dev/laravel-task-management-demo"
+          cd "$DEPLOY_PATH"
+          test -f .env || { echo "Production .env is missing from the app directory."; exit 1; }
+
+          PHP=""
+          for candidate in ea-php84 php8.4 /opt/cpanel/ea-php84/root/usr/bin/php \
+                           /usr/local/bin/ea-php84 /usr/bin/php8.4; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+              PHP="$candidate"
+              break
+            fi
+          done
+          if [ -z "$PHP" ]; then
+            echo "PHP 8.4 was not found. Select it for this domain in cPanel."
+            php -v
+            exit 1
+          fi
+          "$PHP" -v | head -n1
+
+          rm -f bootstrap/cache/packages.php bootstrap/cache/services.php \
+                bootstrap/cache/config.php bootstrap/cache/routes-*.php \
+                bootstrap/cache/events.php
+          "$PHP" <<'CHECK'
+          <?php
+          require 'vendor/autoload.php';
+          $app = require 'bootstrap/app.php';
+          $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+          if (! $app->isProduction()
+              || config('database.default') !== 'mysql'
+              || config('database.connections.mysql.prefix') !== 'tasks_'
+              || config('database.migrations.table') !== 'migrations'
+              || config('session.driver') !== 'file'
+              || config('session.cookie') !== 'task_management_session') {
+              throw new RuntimeException('Task deployment requires production, MySQL prefix tasks_, logical migrations table migrations, and isolated file sessions.');
+          }
+          CHECK
+          "$PHP" artisan optimize:clear
+          "$PHP" artisan down --retry=15 || true
+          trap '"$PHP" artisan up >/dev/null 2>&1 || true' EXIT
+          "$PHP" artisan migrate --force
+          "$PHP" artisan storage:link || true
+          # Keep routes uncached to match the existing hosted subdirectory deployment pattern.
+          "$PHP" artisan route:clear
+          "$PHP" artisan config:cache
+          "$PHP" artisan event:cache
+          "$PHP" artisan view:cache
+          "$PHP" artisan up
+          trap - EXIT
+          DEMO_PUBLIC="/home6/inceptio/demo.mohsinadeel.dev/laravel-task-management-demo/public"
+          DEMO_LINK="/home6/inceptio/demo.mohsinadeel.dev/main/public/laravel-task-management-demo"
+          if [ -d "$DEMO_PUBLIC" ] && [ -d "$(dirname "$DEMO_LINK")" ]; then
+            if [ -L "$DEMO_LINK" ]; then
+              [ "$(readlink -f "$DEMO_LINK")" = "$(readlink -f "$DEMO_PUBLIC")" ] || {
+                echo "Existing demo symlink points to an unexpected target; refusing to replace it."
+                exit 1
+              }
+            elif [ -e "$DEMO_LINK" ]; then
+              echo "Demo link path already exists as a file or directory; refusing to replace it."
+              exit 1
+            else
+              ln -s ../../laravel-task-management-demo/public "$DEMO_LINK"
+            fi
+            echo "Demo public symlink is ready; HTTP/PHP routing still needs live verification."
+          else
+            echo "Symlink deferred until both main and demo public directories are deployed."
+          fi
+          REMOTE
+
+      - name: Disconnect OpenVPN and remove temporary credentials
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/demos-openvpn.pid" ]; then
+            sudo kill "$(cat "$RUNNER_TEMP/demos-openvpn.pid")" || true
+          fi
+          rm -f "$RUNNER_TEMP/demos.ovpn" "$RUNNER_TEMP/demos-vpn.auth" \
+            "$RUNNER_TEMP/demos-deploy-key" "$RUNNER_TEMP/demos-known-hosts"
