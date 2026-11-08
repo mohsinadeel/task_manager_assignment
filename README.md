@@ -2,6 +2,8 @@
 
 A small Laravel assessment application: create, edit, delete, and reorder tasks, grouped by project. Built with **Laravel 12**, **PHP 8.3**, **MySQL 8.4**, Blade, and SortableJS. Local development runs in Docker through Laravel Sail.
 
+![Project task list](docs/screenshot.png)
+
 ## Features
 
 - Task name, integer priority, and Laravel `created_at` / `updated_at` timestamps.

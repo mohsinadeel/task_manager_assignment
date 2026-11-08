@@ -16,9 +16,12 @@ class TaskController extends Controller
 {
     public function index(Request $request): View
     {
-        $project = Project::firstOrCreate(['name' => 'Inbox']);
+        $request->validate(['project' => ['sometimes', 'integer', 'exists:projects,id']]);
+        $projects = Project::orderBy('name')->get();
+        $project = $request->filled('project')
+            ? $projects->firstWhere('id', (int) $request->input('project')) : $projects->first();
 
-        return view('tasks.index', ['project' => $project, 'tasks' => $project->tasks]);
+        return view('tasks.index', ['projects' => $projects, 'project' => $project, 'tasks' => $project?->tasks ?? collect()]);
     }
 
     public function store(TaskRequest $request, Project $project): RedirectResponse

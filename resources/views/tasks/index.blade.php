@@ -1,6 +1,25 @@
 @extends('layouts.app')
 @section('content')
-<div>
+<div class="workspace">
+    <aside>
+        <h2>Projects</h2>
+        <form method="get" action="{{ route('tasks.index') }}">
+            <label for="project">Current project</label>
+            <select name="project" id="project">
+                @forelse($projects as $option)
+                    <option value="{{ $option->id }}" @selected($project?->id === $option->id)>{{ $option->name }}</option>
+                @empty <option value="">No projects yet</option> @endforelse
+            </select>
+            @if($projects->isNotEmpty())<button class="secondary" type="submit">View tasks</button>@endif
+        </form>
+        <hr>
+        <form method="post" action="{{ route('projects.store') }}">
+            @csrf
+            <label for="project-name">New project</label>
+            <input id="project-name" name="name" maxlength="255" required placeholder="e.g. Website launch">
+            <button class="secondary" type="submit">Create project</button>
+        </form>
+    </aside>
     <section>
         <div class="section-heading"><div><p class="eyebrow">YOUR TASKS</p><h1>{{ $project?->name ?? 'Start with a project' }}</h1></div><span class="count">{{ $tasks->count() }} tasks</span></div>
         @if($project)
