@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\TaskRequest;
 use App\Models\Project;
+use App\Models\Task;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,5 +28,17 @@ class TaskController extends Controller
         }, 3);
 
         return to_route('tasks.index', ['project' => $project->id])->with('status', 'Task created.');
+    }
+
+    public function edit(Project $project, Task $task): View
+    {
+        return view('tasks.edit', compact('project', 'task'));
+    }
+
+    public function update(TaskRequest $request, Project $project, Task $task): RedirectResponse
+    {
+        $task->update($request->validated());
+
+        return to_route('tasks.index', ['project' => $project->id])->with('status', 'Task updated.');
     }
 }

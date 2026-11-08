@@ -16,6 +16,7 @@
                         <span class="priority">{{ $task->priority }}</span>
                         <div class="task-info"><strong>{{ $task->name }}</strong><small>Created {{ $task->created_at->format('M j, Y') }}</small></div>
                         <div class="actions">
+                            <a href="{{ route('tasks.edit', [$project, $task]) }}">Edit</a>
                         </div>
                     </li>
                 @endforeach
