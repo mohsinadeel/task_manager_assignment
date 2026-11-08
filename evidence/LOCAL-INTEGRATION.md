@@ -1,8 +1,18 @@
 # Local portal integration evidence
 
 Date: 8 November 2026 (Asia/Karachi).
-Task baseline: `f4590d7`. Portal baseline: `f124b38`. Results below refer to the uncommitted local integration changes, not those baseline commits alone. No integration changes have been pushed or deployed.
+Task baseline: `f4590d7`. Portal baseline: `f124b38`. Historical local results below refer to the integration work before publication; see the hosted verification update for deployed commits and checks.
 
+## Hosted verification — 8 November 2026
+
+This section supersedes historical local-only and Twitter-pending statements below. Mohsin explicitly authorised pushes and deployment of Main and all demos.
+
+- Deployed application commit: `ac965ee` (integration `d6f3ee9` plus Windows SSH-key line-ending normalisation). Manual deployment succeeded: https://github.com/mohsinadeel/task_manager_assignment/actions/runs/42510922808 . Main deployed first and the shared database was backed up before migrations.
+- Target: https://demo.mohsinadeel.dev/laravel-task-management-demo/ . Initial condition: new prefixed Task tables, no projects. Real HTTP checks created a uniquely named synthetic project and two tasks, edited a task, sent a reversed order/version to the reorder endpoint, reloaded to confirm persisted order, and deleted both tasks. All passed. Application-owned CSS/JS assets returned 200. Temporary project removed afterwards.
+- First-run sample setup: the existing DatabaseSeeder ran only after confirming the task project table was empty; two synthetic projects/five tasks now provide examples. No shared users were seeded.
+- Real browser checks: used the move-up control, observed Priority saved, then dragged the second task handle above the first, observed saved priorities and reloaded. Original sample order was restored and persisted. Project dropdown and hosted edit URLs were visible.
+- Server checks: tasks_migrations ledger exists independently beside Main, Stripe and Twitter ledgers; the portal symlink resolves only to this demo public directory.
+- Local pre-deployment rerun: 16 tests / 81 assertions and production asset build passed using Sail/MySQL. No claim of load testing, multi-user browser concurrency verification or old-data import.
 ## Scope
 Task Management remains Laravel 12.71.0 / Sail PHP 8.3.36 / MySQL 8.4. The portal remains Laravel 13.34.0 / Sail PHP 8.4.26 / MySQL 8.4. Local Compose projects and database volumes are independent. Production is intended to use the existing shared database with `tasks_` table prefixes and a separate prefixed migration ledger.
 
